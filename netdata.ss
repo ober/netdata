@@ -215,6 +215,64 @@ create unique index metrics_idx on metrics(name);
       mythreads)
     (sql-close db)))
 
+(def (clear-bundle config)
+  (let* ((config (car (yaml-load config)))
+	 (postgres-user (hash-get config "postgres-user"))
+	 (postgres-db (hash-get config "postgres-db"))
+	 (postgres-passwd (hash-get config "postgres-passwd"))
+	 (db (sql-connect postgresql-connect user: postgres-user passwd: postgres-passwd db: postgres-db))
+	 (q (sql-prepare db "select id from bundle"))
+	 (ids (sql-query q))
+	 (headers '(("Host" . datadog-host)
+		    ("Content-type" . "application/json")))
+	 (ip datadog-host) ;;(resolve-ipv4 datadog-host))
+	 (adds "series")
+	 (uri (make-dd-uri ip adds)))
+    (for-each
+      (lambda (id)
+	(let* ((q2 (sql-prepare db "select data from bundle where id = $1"))
+	       (_ (sql-bind q2 id))
+	       (temp (sql-query q2))
+	       (value (car temp)))
+	  (let-hash (from-json value)
+	    (let* ((host (let-hash (car .series) .host))
+		   (host-id (get-host-id db host (hash))))
+	      (displayln "host is: " host)
+	      (displayln "doing: " id)
+	      (do-post uri headers value)
+	      (update-host-time
+	       host-id
+	       (string->number (date->string (current-date) "~s"))
+	       db)
+	      (delete-bundle db id)))))
+      ids)))
+
+(def (delete-bundle db id)
+  (let* ((rq (sql-prepare db "delete from bundle where id = $1"))
+	 (_ (sql-bind rq id))
+	 (_ (sql-exec rq))
+	 (_ (sql-finalize rq)))
+    (displayln "removed " id)))
+
+
+(def (submit-dp metric time points type host tags)
+  (let* ((headers '(("Content-type" . "application/json")))
+	 (ip  datadog-host)
+	 (uri (make-dd-uri ip "series"))
+	 (data (json-object->string
+		(hash
+		 ("series"
+		  (list
+		   (hash
+		    ("metric" metric)
+		    ("points" (list time points))
+		    ("type" type)
+		    ("host" host)
+		    ("tags"
+		     (list tags)))))))))
+    (displayln "json is: " data)
+    (do-post uri headers data)))
+
 (def (netdata-get-metrics server port host submit-metrics db2 hosts-hash metrics-hash)
   (displayln "doing " host)
   (let* ((uri (netdata-make-uri server port host))
