@@ -267,7 +267,7 @@ create unique index metrics_idx on metrics(name);
 			    (unless cb
 			      (set! cb #t)
 			      (try
-			       (slack-post "error-logs" (format "metric delay of ~a on host ~a for metric ~a.~a" time-delta host metric kk))
+			       (displayln (format "metric delay of ~a on host ~a for metric ~a.~a" time-delta host metric kk))
 			       (catch (e)
 				 (display-exception e))))))
 			(set! series (append series (list new-series)))
